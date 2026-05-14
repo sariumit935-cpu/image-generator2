@@ -7,11 +7,84 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 app.post('/generate', async (req, res) => {
-  const html = req.body.html;
+  const text = req.body.html;
   
-  if (!html) {
+  if (!text) {
     return res.status(400).json({ error: 'HTML is empty' });
   }
+  
+  const fullHtml = `
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+          width: 1080px;
+          height: 1920px;
+          background: #0d0d0d;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-family: Arial, sans-serif;
+        }
+        .wrapper {
+          width: 950px;
+          background: #1a1a1a;
+          border-radius: 50px;
+          padding: 80px;
+          position: relative;
+          border: 2px solid #333;
+        }
+        .header {
+          font-size: 28px;
+          color: #888;
+          margin-bottom: 40px;
+          letter-spacing: 3px;
+          text-transform: uppercase;
+        }
+        .message {
+          background: #f5f5f5;
+          border-radius: 30px;
+          padding: 50px;
+          position: relative;
+        }
+        .message p {
+          font-size: 36px;
+          color: #1a1a1a;
+          line-height: 1.8;
+        }
+        .message::after {
+          content: '';
+          position: absolute;
+          bottom: -25px;
+          left: 50px;
+          width: 0;
+          height: 0;
+          border-left: 25px solid transparent;
+          border-right: 0 solid transparent;
+          border-top: 25px solid #f5f5f5;
+        }
+        .footer {
+          margin-top: 60px;
+          font-size: 26px;
+          color: #555;
+          text-align: center;
+          letter-spacing: 2px;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="wrapper">
+        <div class="header">✉ İtiraf Vakti</div>
+        <div class="message">
+          <p>${text}</p>
+        </div>
+        <div class="footer">— anonim itiraf —</div>
+      </div>
+    </body>
+    </html>
+  `;
   
   try {
     const browser = await puppeteer.launch({
@@ -22,57 +95,12 @@ app.post('/generate', async (req, res) => {
     });
     const page = await browser.newPage();
     await page.setViewport({ width: 1080, height: 1920 });
-    await page.setContent(`
-      <html>
-        <head>
-          <meta charset="UTF-8">
-          <link href="https://fonts.googleapis.com/css2?family=Noto+Emoji&display=swap" rel="stylesheet">
-          <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body {
-              width: 1080px;
-              height: 1920px;
-              background: #0d0d0d;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              font-family: Arial, sans-serif;
-            }
-            .bubble {
-              background: #f0f0f0;
-              border-radius: 40px;
-              padding: 60px;
-              width: 900px;
-              position: relative;
-              box-shadow: 0 8px 40px rgba(0,0,0,0.5);
-            }
-            .bubble p {
-              font-size: 38px;
-              color: #1a1a1a;
-              line-height: 1.7;
-            }
-            .bubble::after {
-              content: '';
-              position: absolute;
-              bottom: -30px;
-              left: 60px;
-              width: 0;
-              height: 0;
-              border-left: 30px solid transparent;
-              border-right: 0px solid transparent;
-              border-top: 30px solid #f0f0f0;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="bubble">
-            <p>${html}</p>
-          </div>
-        </body>
-      </html>
-    `);
+    await page.setContent(fullHtml, { waitUntil: 'networkidle0' });
     await new Promise(r => setTimeout(r, 1000));
-    const screenshot = await page.screenshot({ type: 'png', clip: { x: 0, y: 0, width: 1080, height: 1920 } });
+    const screenshot = await page.screenshot({ 
+      type: 'png', 
+      clip: { x: 0, y: 0, width: 1080, height: 1920 } 
+    });
     await browser.close();
     res.set('Content-Type', 'image/png');
     res.send(screenshot);
