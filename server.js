@@ -9,12 +9,12 @@ app.post('/generate', async (req, res) => {
   
   try {
     const browser = await puppeteer.launch({
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
+      executablePath: '/usr/bin/chromium-browser',
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
     });
     const page = await browser.newPage();
     await page.setViewport({ width: 1080, height: 1920 });
     await page.setContent(html);
-    await page.waitForTimeout(500);
     const screenshot = await page.screenshot({ 
       type: 'png',
       fullPage: false
