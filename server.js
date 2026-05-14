@@ -1,9 +1,20 @@
 const express = require('express');
 const puppeteer = require('puppeteer-core');
 const chromium = require('@sparticuz/chromium');
+const ffmpeg = require('fluent-ffmpeg');
+const ffmpegStatic = require('ffmpeg-static');
+const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
 const app = express();
+
+ffmpeg.setFfmpegPath(ffmpegStatic);
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+const MUSIC_URL = 'https://res.cloudinary.com/df1u8jqzy/video/upload/v1778773620/kutlama_abvxfs.mp3';
+
 app.post('/generate', async (req, res) => {
   const text = req.body.html;
   
@@ -86,7 +97,13 @@ app.post('/generate', async (req, res) => {
     </html>
   `;
   
+  const tmpDir = '/tmp';
+  const imgPath = path.join(tmpDir, `img_${Date.now()}.png`);
+  const videoPath = path.join(tmpDir, `video_${Date.now()}.mp4`);
+  const musicPath = path.join(tmpDir, `music_${Date.now()}.mp3`);
+
   try {
+    // 1. Görsel üret
     const browser = await puppeteer.launch({
       args: chromium.args,
       defaultViewport: { width: 1080, height: 1920 },
@@ -102,11 +119,47 @@ app.post('/generate', async (req, res) => {
       clip: { x: 0, y: 0, width: 1080, height: 1920 } 
     });
     await browser.close();
-    res.set('Content-Type', 'image/png');
-    res.send(screenshot);
+    fs.writeFileSync(imgPath, screenshot);
+
+    // 2. Müziği indir
+    const musicRes = await axios.get(MUSIC_URL, { responseType: 'arraybuffer' });
+    fs.writeFileSync(musicPath, musicRes.data);
+
+    // 3. PNG + MP3 → MP4 (15 saniye)
+    await new Promise((resolve, reject) => {
+      ffmpeg()
+        .input(imgPath)
+        .inputOptions(['-loop 1', '-framerate 1'])
+        .input(musicPath)
+        .outputOptions([
+          '-c:v libx264',
+          '-tune stillimage',
+          '-c:a aac',
+          '-b:a 192k',
+          '-pix_fmt yuv420p',
+          '-t 15',
+          '-vf scale=1080:1920'
+        ])
+        .output(videoPath)
+        .on('end', resolve)
+        .on('error', reject)
+        .run();
+    });
+
+    // 4. Video'yu gönder
+    const videoBuffer = fs.readFileSync(videoPath);
+    res.set('Content-Type', 'video/mp4');
+    res.send(videoBuffer);
+
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
+  } finally {
+    // Temp dosyaları temizle
+    [imgPath, videoPath, musicPath].forEach(f => {
+      if (fs.existsSync(f)) fs.unlinkSync(f);
+    });
   }
 });
+
 app.listen(3000, () => console.log('Running on port 3000'));
