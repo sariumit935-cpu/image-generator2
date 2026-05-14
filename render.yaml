@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: image-generator2
+    env: node
+    buildCommand: apt-get install -y chromium && npm install
+    startCommand: node server.js
