@@ -2,10 +2,8 @@ const express = require('express');
 const puppeteer = require('puppeteer-core');
 const chromium = require('@sparticuz/chromium');
 const app = express();
-
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
 app.post('/generate', async (req, res) => {
   const text = req.body.html;
   
@@ -17,6 +15,7 @@ app.post('/generate', async (req, res) => {
     <html>
     <head>
       <meta charset="UTF-8">
+      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Color+Emoji&display=swap">
       <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -26,7 +25,7 @@ app.post('/generate', async (req, res) => {
           display: flex;
           align-items: center;
           justify-content: center;
-          font-family: Arial, sans-serif;
+          font-family: Arial, 'Noto Color Emoji', sans-serif;
         }
         .wrapper {
           width: 950px;
@@ -53,6 +52,7 @@ app.post('/generate', async (req, res) => {
           font-size: 36px;
           color: #1a1a1a;
           line-height: 1.8;
+          font-family: Arial, 'Noto Color Emoji', sans-serif;
         }
         .message::after {
           content: '';
@@ -96,7 +96,7 @@ app.post('/generate', async (req, res) => {
     const page = await browser.newPage();
     await page.setViewport({ width: 1080, height: 1920 });
     await page.setContent(fullHtml, { waitUntil: 'networkidle0' });
-    await new Promise(r => setTimeout(r, 1000));
+    await new Promise(r => setTimeout(r, 2000));
     const screenshot = await page.screenshot({ 
       type: 'png', 
       clip: { x: 0, y: 0, width: 1080, height: 1920 } 
@@ -109,5 +109,4 @@ app.post('/generate', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 app.listen(3000, () => console.log('Running on port 3000'));
