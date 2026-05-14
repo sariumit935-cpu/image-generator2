@@ -125,12 +125,13 @@ app.post('/generate', async (req, res) => {
     const musicRes = await axios.get(MUSIC_URL, { responseType: 'arraybuffer' });
     fs.writeFileSync(musicPath, musicRes.data);
 
-    // 3. PNG + MP3 → MP4 (15 saniye)
+    // 3. PNG + MP3 → MP4 (15 saniye, müzik döngüde)
     await new Promise((resolve, reject) => {
       ffmpeg()
         .input(imgPath)
         .inputOptions(['-loop 1', '-framerate 1'])
         .input(musicPath)
+        .inputOptions(['-stream_loop -1'])
         .outputOptions([
           '-c:v libx264',
           '-tune stillimage',
@@ -138,7 +139,8 @@ app.post('/generate', async (req, res) => {
           '-b:a 192k',
           '-pix_fmt yuv420p',
           '-t 15',
-          '-vf scale=1080:1920'
+          '-vf scale=1080:1920',
+          '-shortest'
         ])
         .output(videoPath)
         .on('end', resolve)
@@ -155,7 +157,6 @@ app.post('/generate', async (req, res) => {
     console.error(err);
     res.status(500).json({ error: err.message });
   } finally {
-    // Temp dosyaları temizle
     [imgPath, videoPath, musicPath].forEach(f => {
       if (fs.existsSync(f)) fs.unlinkSync(f);
     });
