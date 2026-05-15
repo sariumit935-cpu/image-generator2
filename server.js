@@ -6,32 +6,22 @@ const ffmpegStatic = require('ffmpeg-static');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const OpenAI = require('openai');
-
 const app = express();
+
 ffmpeg.setFfmpegPath(ffmpegStatic);
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 const MUSIC_URL = 'https://res.cloudinary.com/df1u8jqzy/video/upload/v1778773620/kutlama_abvxfs.mp3';
 
 app.post('/generate', async (req, res) => {
   const text = req.body.html;
-
+  
   if (!text) {
     return res.status(400).json({ error: 'HTML is empty' });
   }
-
-  const cleanText = String(text)
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
+  
   const fullHtml = `
     <html>
     <head>
@@ -106,43 +96,27 @@ app.post('/generate', async (req, res) => {
     </body>
     </html>
   `;
-
+  
   const tmpDir = '/tmp';
-  const stamp = Date.now();
-
-  const imgPath = path.join(tmpDir, `img_${stamp}.png`);
-  const videoPath = path.join(tmpDir, `video_${stamp}.mp4`);
-  const musicPath = path.join(tmpDir, `music_${stamp}.mp3`);
-  const voicePath = path.join(tmpDir, `voice_${stamp}.mp3`);
+  const imgPath = path.join(tmpDir, `img_${Date.now()}.png`);
+  const videoPath = path.join(tmpDir, `video_${Date.now()}.mp4`);
+  const musicPath = path.join(tmpDir, `music_${Date.now()}.mp3`);
 
   try {
-    const speech = await openai.audio.speech.create({
-      model: 'gpt-4o-mini-tts',
-      voice: 'nova',
-      input: cleanText,
-      instructions: 'Türkçe konuş. Duygulu, içten, hafif mahcup ve doğal bir kadın sesiyle oku. Çok hızlı okuma.',
-    });
-
-    const voiceBuffer = Buffer.from(await speech.arrayBuffer());
-    fs.writeFileSync(voicePath, voiceBuffer);
-
     const browser = await puppeteer.launch({
       args: chromium.args,
       defaultViewport: { width: 1080, height: 1920 },
       executablePath: await chromium.executablePath(),
       headless: chromium.headless,
     });
-
     const page = await browser.newPage();
     await page.setViewport({ width: 1080, height: 1920 });
     await page.setContent(fullHtml, { waitUntil: 'networkidle0' });
     await new Promise(r => setTimeout(r, 2000));
-
-    const screenshot = await page.screenshot({
-      type: 'png',
-      clip: { x: 0, y: 0, width: 1080, height: 1920 },
+    const screenshot = await page.screenshot({ 
+      type: 'png', 
+      clip: { x: 0, y: 0, width: 1080, height: 1920 } 
     });
-
     await browser.close();
     fs.writeFileSync(imgPath, screenshot);
 
@@ -152,26 +126,18 @@ app.post('/generate', async (req, res) => {
     await new Promise((resolve, reject) => {
       ffmpeg()
         .input(imgPath)
-        .inputOptions(['-loop 1', '-framerate 30'])
-        .input(voicePath)
+        .inputOptions(['-loop 1', '-framerate 1'])
         .input(musicPath)
         .inputOptions(['-stream_loop -1'])
-        .complexFilter([
-          '[1:a]volume=1.25[voice]',
-          '[2:a]volume=0.12[music]',
-          '[voice][music]amix=inputs=2:duration=first:dropout_transition=2[aout]',
-        ])
         .outputOptions([
-          '-map 0:v',
-          '-map [aout]',
           '-c:v libx264',
           '-tune stillimage',
           '-c:a aac',
           '-b:a 192k',
           '-pix_fmt yuv420p',
+          '-t 15',
           '-vf scale=1080:1920',
-          '-shortest',
-          '-movflags +faststart',
+          '-shortest'
         ])
         .output(videoPath)
         .on('end', resolve)
@@ -187,7 +153,7 @@ app.post('/generate', async (req, res) => {
     console.error(err);
     res.status(500).json({ error: err.message });
   } finally {
-    [imgPath, videoPath, musicPath, voicePath].forEach(f => {
+    [imgPath, videoPath, musicPath].forEach(f => {
       if (fs.existsSync(f)) fs.unlinkSync(f);
     });
   }
