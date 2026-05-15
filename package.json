@@ -11,6 +11,7 @@
     "puppeteer-core": "^22.0.0",
     "fluent-ffmpeg": "^2.1.2",
     "axios": "^1.6.0",
-    "ffmpeg-static": "^5.2.0"
+    "ffmpeg-static": "^5.2.0",
+    "openai": "^4.104.0"
   }
 }
