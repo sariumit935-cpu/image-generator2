@@ -6,23 +6,32 @@ const ffmpegStatic = require('ffmpeg-static');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const app = express();
+const OpenAI = require('openai');
 
+const app = express();
 ffmpeg.setFfmpegPath(ffmpegStatic);
 
-app.use(express.json());
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 const MUSIC_URL = 'https://res.cloudinary.com/df1u8jqzy/video/upload/v1778773620/kutlama_abvxfs.mp3';
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 app.post('/generate', async (req, res) => {
   const text = req.body.html;
-  
+
   if (!text) {
     return res.status(400).json({ error: 'HTML is empty' });
   }
-  
+
+  const cleanText = String(text)
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
   const fullHtml = `
     <html>
     <head>
@@ -97,95 +106,72 @@ app.post('/generate', async (req, res) => {
     </body>
     </html>
   `;
-  
+
   const tmpDir = '/tmp';
-  const imgPath = path.join(tmpDir, `img_${Date.now()}.png`);
-  const videoPath = path.join(tmpDir, `video_${Date.now()}.mp4`);
-  const musicPath = path.join(tmpDir, `music_${Date.now()}.mp3`);
-  const voicePath = path.join(tmpDir, `voice_${Date.now()}.mp3`);
-  const mixedAudioPath = path.join(tmpDir, `mixed_${Date.now()}.mp3`);
+  const stamp = Date.now();
+
+  const imgPath = path.join(tmpDir, `img_${stamp}.png`);
+  const videoPath = path.join(tmpDir, `video_${stamp}.mp4`);
+  const musicPath = path.join(tmpDir, `music_${stamp}.mp3`);
+  const voicePath = path.join(tmpDir, `voice_${stamp}.mp3`);
 
   try {
-    // 1. Görsel üret
+    const speech = await openai.audio.speech.create({
+      model: 'gpt-4o-mini-tts',
+      voice: 'nova',
+      input: cleanText,
+      instructions: 'Türkçe konuş. Duygulu, içten, hafif mahcup ve doğal bir kadın sesiyle oku. Çok hızlı okuma.',
+    });
+
+    const voiceBuffer = Buffer.from(await speech.arrayBuffer());
+    fs.writeFileSync(voicePath, voiceBuffer);
+
     const browser = await puppeteer.launch({
       args: chromium.args,
       defaultViewport: { width: 1080, height: 1920 },
       executablePath: await chromium.executablePath(),
       headless: chromium.headless,
     });
+
     const page = await browser.newPage();
     await page.setViewport({ width: 1080, height: 1920 });
     await page.setContent(fullHtml, { waitUntil: 'networkidle0' });
     await new Promise(r => setTimeout(r, 2000));
-    const screenshot = await page.screenshot({ 
-      type: 'png', 
-      clip: { x: 0, y: 0, width: 1080, height: 1920 } 
+
+    const screenshot = await page.screenshot({
+      type: 'png',
+      clip: { x: 0, y: 0, width: 1080, height: 1920 },
     });
+
     await browser.close();
     fs.writeFileSync(imgPath, screenshot);
 
-    // 2. OpenAI TTS - kadın sesi ile seslendirme
-    const ttsResponse = await axios.post(
-      'https://api.openai.com/v1/audio/speech',
-      {
-        model: 'tts-1',
-        input: text,
-        voice: 'nova',
-        speed: 0.95
-      },
-      {
-        headers: {
-          'Authorization': `Bearer ${OPENAI_API_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        responseType: 'arraybuffer'
-      }
-    );
-    fs.writeFileSync(voicePath, ttsResponse.data);
-
-    // 3. Arka plan müziğini indir
     const musicRes = await axios.get(MUSIC_URL, { responseType: 'arraybuffer' });
     fs.writeFileSync(musicPath, musicRes.data);
-
-    // 4. Müzik + seslendirme miksi (müzik altta hafif, ses üstte)
-    await new Promise((resolve, reject) => {
-      ffmpeg()
-        .input(musicPath)
-        .inputOptions(['-stream_loop -1'])
-        .input(voicePath)
-        .complexFilter([
-          '[0:a]volume=0.15[music]',
-          '[1:a]volume=1.0[voice]',
-          '[music][voice]amix=inputs=2:duration=longest[aout]'
-        ])
-        .outputOptions(['-map [aout]', '-t 60'])
-        .output(mixedAudioPath)
-        .on('end', resolve)
-        .on('error', reject)
-        .run();
-    });
-
-    // 5. Görsel + miksi ses → MP4
-    const voiceDuration = await new Promise((resolve) => {
-      ffmpeg.ffprobe(voicePath, (err, metadata) => {
-        resolve(Math.ceil(metadata?.format?.duration || 30) + 1);
-      });
-    });
 
     await new Promise((resolve, reject) => {
       ffmpeg()
         .input(imgPath)
-        .inputOptions(['-loop 1', '-framerate 1'])
-        .input(mixedAudioPath)
+        .inputOptions(['-loop 1', '-framerate 30'])
+        .input(voicePath)
+        .input(musicPath)
+        .inputOptions(['-stream_loop -1'])
+        .complexFilter([
+          '[1:a]volume=1.25[voice]',
+          '[2:a]volume=0.12[music]',
+          '[voice][music]amix=inputs=2:duration=first:dropout_transition=2[aout]',
+        ])
         .outputOptions([
+          '-map 0:v',
+          '-map [aout]',
           '-c:v libx264',
           '-tune stillimage',
           '-c:a aac',
           '-b:a 192k',
           '-pix_fmt yuv420p',
-          `-t ${voiceDuration}`,
           '-vf scale=1080:1920',
-          '-shortest'
+          '-shortest',
+          '-movflags +faststart',
         ])
         .output(videoPath)
         .on('end', resolve)
@@ -193,7 +179,6 @@ app.post('/generate', async (req, res) => {
         .run();
     });
 
-    // 6. Video'yu gönder
     const videoBuffer = fs.readFileSync(videoPath);
     res.set('Content-Type', 'video/mp4');
     res.send(videoBuffer);
@@ -202,7 +187,7 @@ app.post('/generate', async (req, res) => {
     console.error(err);
     res.status(500).json({ error: err.message });
   } finally {
-    [imgPath, videoPath, musicPath, voicePath, mixedAudioPath].forEach(f => {
+    [imgPath, videoPath, musicPath, voicePath].forEach(f => {
       if (fs.existsSync(f)) fs.unlinkSync(f);
     });
   }
