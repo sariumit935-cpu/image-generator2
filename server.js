@@ -87,11 +87,11 @@ app.post('/generate', async (req, res) => {
     </head>
     <body>
       <div class="wrapper">
-        <div class="header">✉ İtiraf Vakti</div>
+        <div class="header">✉ Confession Time</div>
         <div class="message">
           <p>${text}</p>
         </div>
-        <div class="footer">— anonim itiraf —</div>
+        <div class="footer">— anonymous confession —</div>
       </div>
     </body>
     </html>
