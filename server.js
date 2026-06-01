@@ -13,7 +13,7 @@ ffmpeg.setFfmpegPath(ffmpegStatic);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-const MUSIC_URL = 'https://res.cloudinary.com/df1u8jqzy/video/upload/v1778773620/kutlama_abvxfs.mp3';
+const MUSIC_URL = 'https://res.cloudinary.com/df1u8jqzy/video/upload/v1780299910/kutlama_abvxfs_cj39rm.mp3';
 
 app.post('/generate', async (req, res) => {
   const text = req.body.html;
