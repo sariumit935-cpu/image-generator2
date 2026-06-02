@@ -124,13 +124,20 @@ app.post('/generate', async (req, res) => {
     });
 
     fs.writeFileSync(imgPath, screenshot);
+    await browser.close();
+    browser = null;
 
+    // Müziği stream ile indir — arraybuffer yerine direkt diske yaz
     const musicRes = await axios.get(MUSIC_URL, {
-      responseType: 'arraybuffer',
+      responseType: 'stream',
       timeout: 60000
     });
-
-    fs.writeFileSync(musicPath, musicRes.data);
+    await new Promise((resolve, reject) => {
+      const writer = fs.createWriteStream(musicPath);
+      musicRes.data.pipe(writer);
+      writer.on('finish', resolve);
+      writer.on('error', reject);
+    });
 
     await new Promise((resolve, reject) => {
       ffmpeg()
@@ -164,15 +171,14 @@ app.post('/generate', async (req, res) => {
         .run();
     });
 
-    const videoBuffer = fs.readFileSync(videoPath);
-
+    // Video buffer yerine direkt stream — RAM'e yükleme
+    const stat = fs.statSync(videoPath);
     res.set({
       'Content-Type': 'video/mp4',
-      'Content-Length': videoBuffer.length,
+      'Content-Length': stat.size,
       'Cache-Control': 'no-store'
     });
-
-    res.send(videoBuffer);
+    fs.createReadStream(videoPath).pipe(res);
 
   } catch (err) {
     console.error('Generate error:', err);
@@ -183,7 +189,9 @@ app.post('/generate', async (req, res) => {
     }
 
     [imgPath, videoPath, musicPath].forEach(f => {
-      if (fs.existsSync(f)) fs.unlinkSync(f);
+      if (fs.existsSync(f)) {
+        try { fs.unlinkSync(f); } catch (e) {}
+      }
     });
   }
 });
