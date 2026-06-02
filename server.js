@@ -1,101 +1,53 @@
 const express = require('express');
-const puppeteer = require('puppeteer-core');
-const chromium = require('@sparticuz/chromium');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegStatic = require('ffmpeg-static');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const app = express();
+const { createCanvas, registerFont } = require('canvas');
 
 ffmpeg.setFfmpegPath(ffmpegStatic);
 
+const app = express();
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
 const MUSIC_URL = 'https://res.cloudinary.com/df1u8jqzy/video/upload/v1780299910/kutlama_abvxfs_cj39rm.mp3';
 
+function wrapText(ctx, text, maxWidth) {
+  const words = text.split(' ');
+  const lines = [];
+  let current = '';
+  for (const word of words) {
+    const test = current ? current + ' ' + word : word;
+    if (ctx.measureText(test).width > maxWidth && current) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = test;
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+function drawRoundedRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
 app.post('/generate', async (req, res) => {
   const text = req.body.html;
-
-  if (!text) {
-    return res.status(400).json({ error: 'HTML is empty' });
-  }
-
-  const fullHtml = `
-    <html>
-    <head>
-      <meta charset="UTF-8">
-      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Color+Emoji&display=swap">
-      <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-          width: 1080px;
-          height: 1920px;
-          background: #0d0d0d;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-family: Arial, 'Noto Color Emoji', sans-serif;
-        }
-        .wrapper {
-          width: 950px;
-          background: #1a1a1a;
-          border-radius: 50px;
-          padding: 80px;
-          position: relative;
-          border: 2px solid #333;
-        }
-        .header {
-          font-size: 28px;
-          color: #888;
-          margin-bottom: 40px;
-          letter-spacing: 3px;
-          text-transform: uppercase;
-        }
-        .message {
-          background: #f5f5f5;
-          border-radius: 30px;
-          padding: 50px;
-          position: relative;
-        }
-        .message p {
-          font-size: 36px;
-          color: #1a1a1a;
-          line-height: 1.8;
-          font-family: Arial, 'Noto Color Emoji', sans-serif;
-        }
-        .message::after {
-          content: '';
-          position: absolute;
-          bottom: -25px;
-          left: 50px;
-          width: 0;
-          height: 0;
-          border-left: 25px solid transparent;
-          border-right: 0 solid transparent;
-          border-top: 25px solid #f5f5f5;
-        }
-        .footer {
-          margin-top: 60px;
-          font-size: 26px;
-          color: #555;
-          text-align: center;
-          letter-spacing: 2px;
-        }
-      </style>
-    </head>
-    <body>
-      <div class="wrapper">
-        <div class="header">✉ Confession Time</div>
-        <div class="message">
-          <p>${text}</p>
-        </div>
-        <div class="footer">— anonymous confession —</div>
-      </div>
-    </body>
-    </html>
-  `;
+  if (!text) return res.status(400).json({ error: 'HTML is empty' });
 
   const tmpDir = '/tmp';
   const stamp = Date.now();
@@ -103,35 +55,62 @@ app.post('/generate', async (req, res) => {
   const videoPath = path.join(tmpDir, `video_${stamp}.mp4`);
   const musicPath = path.join(tmpDir, `music_${stamp}.mp3`);
 
-  let browser;
-
   try {
-    browser = await puppeteer.launch({
-      args: chromium.args,
-      defaultViewport: { width: 1080, height: 1920 },
-      executablePath: await chromium.executablePath(),
-      headless: chromium.headless,
-    });
+    // Canvas ile görsel oluştur
+    const W = 1080, H = 1920;
+    const canvas = createCanvas(W, H);
+    const ctx = canvas.getContext('2d');
 
-    const page = await browser.newPage();
-    await page.setViewport({ width: 1080, height: 1920 });
-    await page.setContent(fullHtml, { waitUntil: 'networkidle0' });
-    await new Promise(r => setTimeout(r, 2000));
+    // Arka plan
+    ctx.fillStyle = '#0d0d0d';
+    ctx.fillRect(0, 0, W, H);
 
-    const screenshot = await page.screenshot({
-      type: 'png',
-      clip: { x: 0, y: 0, width: 1080, height: 1920 }
-    });
+    // Wrapper kart
+    const padX = 65, cardY = 680, cardW = W - padX * 2, cardH = 560;
+    ctx.fillStyle = '#1a1a1a';
+    drawRoundedRect(ctx, padX, cardY, cardW, cardH, 50);
+    ctx.fill();
+    ctx.strokeStyle = '#333333';
+    ctx.lineWidth = 2;
+    ctx.stroke();
 
-    fs.writeFileSync(imgPath, screenshot);
-    await browser.close();
-    browser = null;
+    // Header
+    ctx.fillStyle = '#888888';
+    ctx.font = '28px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('✉  CONFESSION TIME', W / 2, cardY + 70);
 
-    // Müziği stream ile indir — arraybuffer yerine direkt diske yaz
-    const musicRes = await axios.get(MUSIC_URL, {
-      responseType: 'stream',
-      timeout: 60000
-    });
+    // Mesaj kutusu
+    const msgX = padX + 50, msgY = cardY + 110, msgW = cardW - 100, msgH = 340;
+    ctx.fillStyle = '#f5f5f5';
+    drawRoundedRect(ctx, msgX, msgY, msgW, msgH, 30);
+    ctx.fill();
+
+    // Mesaj metni
+    ctx.fillStyle = '#1a1a1a';
+    ctx.font = '34px Arial';
+    ctx.textAlign = 'left';
+    const lines = wrapText(ctx, text, msgW - 80);
+    const lineHeight = 52;
+    const totalTextH = lines.length * lineHeight;
+    let textY = msgY + (msgH - totalTextH) / 2 + 34;
+    for (const line of lines) {
+      ctx.fillText(line, msgX + 40, textY);
+      textY += lineHeight;
+    }
+
+    // Footer
+    ctx.fillStyle = '#555555';
+    ctx.font = '26px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('— anonymous confession —', W / 2, cardY + cardH - 30);
+
+    // PNG kaydet
+    const buffer = canvas.toBuffer('image/png');
+    fs.writeFileSync(imgPath, buffer);
+
+    // Müzik indir
+    const musicRes = await axios.get(MUSIC_URL, { responseType: 'stream', timeout: 60000 });
     await new Promise((resolve, reject) => {
       const writer = fs.createWriteStream(musicPath);
       musicRes.data.pipe(writer);
@@ -139,17 +118,13 @@ app.post('/generate', async (req, res) => {
       writer.on('error', reject);
     });
 
+    // Video oluştur
     await new Promise((resolve, reject) => {
       ffmpeg()
         .input(imgPath)
-        .inputOptions([
-          '-loop 1',
-          '-framerate 30'
-        ])
+        .inputOptions(['-loop 1', '-framerate 30'])
         .input(musicPath)
-        .inputOptions([
-          '-stream_loop -1'
-        ])
+        .inputOptions(['-stream_loop -1'])
         .outputOptions([
           '-t 15',
           '-c:v libx264',
@@ -171,7 +146,6 @@ app.post('/generate', async (req, res) => {
         .run();
     });
 
-    // Video buffer yerine direkt stream — RAM'e yükleme
     const stat = fs.statSync(videoPath);
     res.set({
       'Content-Type': 'video/mp4',
@@ -184,20 +158,11 @@ app.post('/generate', async (req, res) => {
     console.error('Generate error:', err);
     res.status(500).json({ error: err.message });
   } finally {
-    if (browser) {
-      try { await browser.close(); } catch (e) {}
-    }
-
     [imgPath, videoPath, musicPath].forEach(f => {
-      if (fs.existsSync(f)) {
-        try { fs.unlinkSync(f); } catch (e) {}
-      }
+      if (fs.existsSync(f)) try { fs.unlinkSync(f); } catch (e) {}
     });
   }
 });
 
-app.get('/', (req, res) => {
-  res.send('Image generator is running.');
-});
-
+app.get('/', (req, res) => res.send('Image generator is running.'));
 app.listen(3000, () => console.log('Running on port 3000'));
