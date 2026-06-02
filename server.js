@@ -10,18 +10,18 @@ const app = express();
 
 ffmpeg.setFfmpegPath(ffmpegStatic);
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
 const MUSIC_URL = 'https://res.cloudinary.com/df1u8jqzy/video/upload/v1780299910/kutlama_abvxfs_cj39rm.mp3';
 
 app.post('/generate', async (req, res) => {
   const text = req.body.html;
-  
+
   if (!text) {
     return res.status(400).json({ error: 'HTML is empty' });
   }
-  
+
   const fullHtml = `
     <html>
     <head>
@@ -96,47 +96,66 @@ app.post('/generate', async (req, res) => {
     </body>
     </html>
   `;
-  
+
   const tmpDir = '/tmp';
-  const imgPath = path.join(tmpDir, `img_${Date.now()}.png`);
-  const videoPath = path.join(tmpDir, `video_${Date.now()}.mp4`);
-  const musicPath = path.join(tmpDir, `music_${Date.now()}.mp3`);
+  const stamp = Date.now();
+  const imgPath = path.join(tmpDir, `img_${stamp}.png`);
+  const videoPath = path.join(tmpDir, `video_${stamp}.mp4`);
+  const musicPath = path.join(tmpDir, `music_${stamp}.mp3`);
+
+  let browser;
 
   try {
-    const browser = await puppeteer.launch({
+    browser = await puppeteer.launch({
       args: chromium.args,
       defaultViewport: { width: 1080, height: 1920 },
       executablePath: await chromium.executablePath(),
       headless: chromium.headless,
     });
+
     const page = await browser.newPage();
     await page.setViewport({ width: 1080, height: 1920 });
     await page.setContent(fullHtml, { waitUntil: 'networkidle0' });
     await new Promise(r => setTimeout(r, 2000));
-    const screenshot = await page.screenshot({ 
-      type: 'png', 
-      clip: { x: 0, y: 0, width: 1080, height: 1920 } 
+
+    const screenshot = await page.screenshot({
+      type: 'png',
+      clip: { x: 0, y: 0, width: 1080, height: 1920 }
     });
-    await browser.close();
+
     fs.writeFileSync(imgPath, screenshot);
 
-    const musicRes = await axios.get(MUSIC_URL, { responseType: 'arraybuffer' });
+    const musicRes = await axios.get(MUSIC_URL, {
+      responseType: 'arraybuffer',
+      timeout: 60000
+    });
+
     fs.writeFileSync(musicPath, musicRes.data);
 
     await new Promise((resolve, reject) => {
       ffmpeg()
         .input(imgPath)
-        .inputOptions(['-loop 1', '-framerate 1'])
+        .inputOptions([
+          '-loop 1',
+          '-framerate 30'
+        ])
         .input(musicPath)
-        .inputOptions(['-stream_loop -1'])
+        .inputOptions([
+          '-stream_loop -1'
+        ])
         .outputOptions([
-          '-c:v libx264',
-          '-tune stillimage',
-          '-c:a aac',
-          '-b:a 192k',
-          '-pix_fmt yuv420p',
           '-t 15',
-          '-vf scale=1080:1920',
+          '-c:v libx264',
+          '-preset veryfast',
+          '-profile:v high',
+          '-level 4.0',
+          '-r 30',
+          '-vf format=yuv420p,scale=1080:1920',
+          '-c:a aac',
+          '-b:a 128k',
+          '-ar 44100',
+          '-ac 2',
+          '-movflags +faststart',
           '-shortest'
         ])
         .output(videoPath)
@@ -146,17 +165,31 @@ app.post('/generate', async (req, res) => {
     });
 
     const videoBuffer = fs.readFileSync(videoPath);
-    res.set('Content-Type', 'video/mp4');
+
+    res.set({
+      'Content-Type': 'video/mp4',
+      'Content-Length': videoBuffer.length,
+      'Cache-Control': 'no-store'
+    });
+
     res.send(videoBuffer);
 
   } catch (err) {
-    console.error(err);
+    console.error('Generate error:', err);
     res.status(500).json({ error: err.message });
   } finally {
+    if (browser) {
+      try { await browser.close(); } catch (e) {}
+    }
+
     [imgPath, videoPath, musicPath].forEach(f => {
       if (fs.existsSync(f)) fs.unlinkSync(f);
     });
   }
+});
+
+app.get('/', (req, res) => {
+  res.send('Image generator is running.');
 });
 
 app.listen(3000, () => console.log('Running on port 3000'));
