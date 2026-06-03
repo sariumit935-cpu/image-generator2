@@ -15,6 +15,19 @@ const MUSIC_URL = 'https://res.cloudinary.com/df1u8jqzy/video/upload/v1780299910
 const CLOUD_NAME = 'df1u8jqzy';
 const BG_PUBLIC_ID = 'confession_bg_1_nrxrxr';
 
+function cleanText(text) {
+  return text
+    .normalize('NFD')                    // unicode normalize
+    .replace(/[\u0300-\u036f]/g, '')     // aksan kaldır
+    .replace(/[\u2018\u2019]/g, "'")     // unicode tırnak → düz
+    .replace(/[\u201C\u201D]/g, '"')     // unicode çift tırnak → düz
+    .replace(/[^\x20-\x7E]/g, '')        // ASCII dışı her şeyi kaldır (emoji dahil)
+    .replace(/[,\/\\#!$%^&*;:{}=\-_`~()\[\]|<>]/g, ' ') // özel karakterleri boşluk yap
+    .replace(/\s+/g, ' ')               // çoklu boşluk → tek
+    .trim()
+    .substring(0, 250);
+}
+
 app.post('/generate', async (req, res) => {
   const text = req.body.html;
   if (!text) return res.status(400).json({ error: 'html is empty' });
@@ -26,17 +39,13 @@ app.post('/generate', async (req, res) => {
   const musicPath = path.join(tmpDir, `music_${stamp}.mp3`);
 
   try {
-    // Metni kısalt ve temizle — Cloudinary URL'si için güvenli hale getir
-    // Cloudinary text overlay max ~50 kelime
-    const cleanText = text
-      .replace(/['"]/g, '')        // tırnak kaldır
-      .replace(/[^\x00-\x7F]/g, '') // emoji ve unicode kaldır
-      .substring(0, 300);           // max 300 karakter
+    const clean = cleanText(text);
+    console.log('Clean text:', clean.substring(0, 80));
 
-    const encoded = encodeURIComponent(cleanText);
+    const encoded = encodeURIComponent(clean);
     const imageUrl = `https://res.cloudinary.com/${CLOUD_NAME}/image/upload/l_text:Arial_42:${encoded},co_rgb:1a1a1a,w_850,c_fit,g_north_west,x_130,y_340/${BG_PUBLIC_ID}.png`;
+    console.log('Image URL length:', imageUrl.length);
 
-    // Görseli indir
     const imgRes = await axios.get(imageUrl, { responseType: 'stream', timeout: 30000 });
     await new Promise((resolve, reject) => {
       const writer = fs.createWriteStream(imgPath);
@@ -45,7 +54,6 @@ app.post('/generate', async (req, res) => {
       writer.on('error', reject);
     });
 
-    // Müziği indir
     const musicRes = await axios.get(MUSIC_URL, { responseType: 'stream', timeout: 60000 });
     await new Promise((resolve, reject) => {
       const writer = fs.createWriteStream(musicPath);
@@ -54,7 +62,6 @@ app.post('/generate', async (req, res) => {
       writer.on('error', reject);
     });
 
-    // Video oluştur
     await new Promise((resolve, reject) => {
       ffmpeg()
         .input(imgPath).inputOptions(['-loop 1', '-framerate 30'])
