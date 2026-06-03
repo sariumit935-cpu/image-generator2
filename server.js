@@ -4,7 +4,7 @@ const ffmpegStatic = require('ffmpeg-static');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const Jimp = require('jimp');
+const { Jimp, HorizontalAlign, VerticalAlign } = require('jimp');
 
 ffmpeg.setFfmpegPath(ffmpegStatic);
 
@@ -13,9 +13,6 @@ app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
 const MUSIC_URL = 'https://res.cloudinary.com/df1u8jqzy/video/upload/v1780299910/kutlama_abvxfs_cj39rm.mp3';
-
-const FONT_LARGE = path.join(__dirname, 'fonts', 'open-sans-32-white.fnt');
-const FONT_MEDIUM = path.join(__dirname, 'fonts', 'open-sans-16-white.fnt');
 
 app.post('/generate', async (req, res) => {
   const text = req.body.html;
@@ -33,12 +30,12 @@ app.post('/generate', async (req, res) => {
     // Arka plan
     const img = new Jimp({ width: W, height: H, color: 0x0d0d0dff });
 
-    // Kart arka planı (koyu gri dikdörtgen)
+    // Kart arka planı
     const cardX = 65, cardY = 650, cardW = W - 130, cardH = 620;
     const card = new Jimp({ width: cardW, height: cardH, color: 0x1a1a1aff });
     img.composite(card, cardX, cardY);
 
-    // Mesaj kutusu (beyaz)
+    // Mesaj kutusu
     const msgX = 115, msgY = 720, msgW = cardW - 100, msgH = 380;
     const msgBox = new Jimp({ width: msgW, height: msgH, color: 0xf5f5f5ff });
     img.composite(msgBox, msgX, msgY);
@@ -47,26 +44,26 @@ app.post('/generate', async (req, res) => {
     const fontLarge = await Jimp.loadFont(Jimp.FONT_SANS_32_BLACK);
     const fontMedium = await Jimp.loadFont(Jimp.FONT_SANS_16_WHITE);
 
-    // Header yazısı
-    img.print(fontMedium, 0, cardY + 35, {
+    // Header
+    img.print({ font: fontMedium, x: 0, y: cardY + 35, text: {
       text: 'CONFESSION TIME',
-      alignmentX: Jimp.HORIZONTAL_ALIGN_CENTER,
-      alignmentY: Jimp.VERTICAL_ALIGN_MIDDLE
-    }, W, 40);
+      alignmentX: HorizontalAlign.CENTER,
+      alignmentY: VerticalAlign.MIDDLE
+    }, width: W, height: 40 });
 
     // Mesaj metni
-    img.print(fontLarge, msgX + 30, msgY + 30, {
+    img.print({ font: fontLarge, x: msgX + 30, y: msgY + 30, text: {
       text: text,
-      alignmentX: Jimp.HORIZONTAL_ALIGN_LEFT,
-      alignmentY: Jimp.VERTICAL_ALIGN_TOP
-    }, msgW - 60, msgH - 60);
+      alignmentX: HorizontalAlign.LEFT,
+      alignmentY: VerticalAlign.TOP
+    }, width: msgW - 60, height: msgH - 60 });
 
-    // Footer yazısı
-    img.print(fontMedium, 0, cardY + cardH - 50, {
+    // Footer
+    img.print({ font: fontMedium, x: 0, y: cardY + cardH - 50, text: {
       text: '— anonymous confession —',
-      alignmentX: Jimp.HORIZONTAL_ALIGN_CENTER,
-      alignmentY: Jimp.VERTICAL_ALIGN_MIDDLE
-    }, W, 40);
+      alignmentX: HorizontalAlign.CENTER,
+      alignmentY: VerticalAlign.MIDDLE
+    }, width: W, height: 40 });
 
     await img.write(imgPath);
 
@@ -87,19 +84,11 @@ app.post('/generate', async (req, res) => {
         .input(musicPath)
         .inputOptions(['-stream_loop -1'])
         .outputOptions([
-          '-t 15',
-          '-c:v libx264',
-          '-preset veryfast',
-          '-profile:v high',
-          '-level 4.0',
-          '-r 30',
+          '-t 15', '-c:v libx264', '-preset veryfast',
+          '-profile:v high', '-level 4.0', '-r 30',
           '-vf format=yuv420p,scale=1080:1920',
-          '-c:a aac',
-          '-b:a 128k',
-          '-ar 44100',
-          '-ac 2',
-          '-movflags +faststart',
-          '-shortest'
+          '-c:a aac', '-b:a 128k', '-ar 44100', '-ac 2',
+          '-movflags +faststart', '-shortest'
         ])
         .output(videoPath)
         .on('end', resolve)
@@ -108,11 +97,7 @@ app.post('/generate', async (req, res) => {
     });
 
     const stat = fs.statSync(videoPath);
-    res.set({
-      'Content-Type': 'video/mp4',
-      'Content-Length': stat.size,
-      'Cache-Control': 'no-store'
-    });
+    res.set({ 'Content-Type': 'video/mp4', 'Content-Length': stat.size, 'Cache-Control': 'no-store' });
     fs.createReadStream(videoPath).pipe(res);
 
   } catch (err) {
