@@ -4,7 +4,7 @@ const ffmpegStatic = require('ffmpeg-static');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const { Jimp, HorizontalAlign, VerticalAlign } = require('jimp');
+const pureimage = require('pureimage');
 
 ffmpeg.setFfmpegPath(ffmpegStatic);
 
@@ -13,6 +13,23 @@ app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
 const MUSIC_URL = 'https://res.cloudinary.com/df1u8jqzy/video/upload/v1780299910/kutlama_abvxfs_cj39rm.mp3';
+
+function wrapText(ctx, text, maxWidth) {
+  const words = text.split(' ');
+  const lines = [];
+  let current = '';
+  for (const word of words) {
+    const test = current ? current + ' ' + word : word;
+    if (ctx.measureText(test).width > maxWidth && current) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = test;
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
 
 app.post('/generate', async (req, res) => {
   const text = req.body.html;
@@ -26,46 +43,51 @@ app.post('/generate', async (req, res) => {
 
   try {
     const W = 1080, H = 1920;
+    const img = pureimage.make(W, H);
+    const ctx = img.getContext('2d');
 
     // Arka plan
-    const img = new Jimp({ width: W, height: H, color: 0x0d0d0dff });
+    ctx.fillStyle = '#0d0d0d';
+    ctx.fillRect(0, 0, W, H);
 
-    // Kart arka planı
-    const cardX = 65, cardY = 650, cardW = W - 130, cardH = 620;
-    const card = new Jimp({ width: cardW, height: cardH, color: 0x1a1a1aff });
-    img.composite(card, cardX, cardY);
+    // Kart
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(65, 650, W - 130, 620);
 
     // Mesaj kutusu
-    const msgX = 115, msgY = 720, msgW = cardW - 100, msgH = 380;
-    const msgBox = new Jimp({ width: msgW, height: msgH, color: 0xf5f5f5ff });
-    img.composite(msgBox, msgX, msgY);
-
-    // Fontları yükle
-    const fontLarge = await Jimp.loadFont(Jimp.FONT_SANS_32_BLACK);
-    const fontMedium = await Jimp.loadFont(Jimp.FONT_SANS_16_WHITE);
+    ctx.fillStyle = '#f5f5f5';
+    ctx.fillRect(115, 720, W - 230, 380);
 
     // Header
-    img.print({ font: fontMedium, x: 0, y: cardY + 35, text: {
-      text: 'CONFESSION TIME',
-      alignmentX: HorizontalAlign.CENTER,
-      alignmentY: VerticalAlign.MIDDLE
-    }, width: W, height: 40 });
+    ctx.fillStyle = '#888888';
+    ctx.font = '28pt LiberationSans';
+    ctx.textAlign = 'center';
+    ctx.fillText('✉ CONFESSION TIME', W / 2, 710);
 
     // Mesaj metni
-    img.print({ font: fontLarge, x: msgX + 30, y: msgY + 30, text: {
-      text: text,
-      alignmentX: HorizontalAlign.LEFT,
-      alignmentY: VerticalAlign.TOP
-    }, width: msgW - 60, height: msgH - 60 });
+    ctx.fillStyle = '#1a1a1a';
+    ctx.font = '32pt LiberationSans';
+    ctx.textAlign = 'left';
+    const msgW = W - 230 - 80;
+    const lines = wrapText(ctx, text, msgW);
+    const lineH = 52;
+    let ty = 780;
+    for (const line of lines) {
+      ctx.fillText(line, 155, ty);
+      ty += lineH;
+    }
 
     // Footer
-    img.print({ font: fontMedium, x: 0, y: cardY + cardH - 50, text: {
-      text: '— anonymous confession —',
-      alignmentX: HorizontalAlign.CENTER,
-      alignmentY: VerticalAlign.MIDDLE
-    }, width: W, height: 40 });
+    ctx.fillStyle = '#555555';
+    ctx.font = '24pt LiberationSans';
+    ctx.textAlign = 'center';
+    ctx.fillText('— anonymous confession —', W / 2, 1230);
 
-    await img.write(imgPath);
+    // PNG kaydet
+    await new Promise((resolve, reject) => {
+      const out = fs.createWriteStream(imgPath);
+      pureimage.encodePNGToStream(img, out).then(resolve).catch(reject);
+    });
 
     // Müzik indir
     const musicRes = await axios.get(MUSIC_URL, { responseType: 'stream', timeout: 60000 });
@@ -79,21 +101,11 @@ app.post('/generate', async (req, res) => {
     // Video oluştur
     await new Promise((resolve, reject) => {
       ffmpeg()
-        .input(imgPath)
-        .inputOptions(['-loop 1', '-framerate 30'])
-        .input(musicPath)
-        .inputOptions(['-stream_loop -1'])
-        .outputOptions([
-          '-t 15', '-c:v libx264', '-preset veryfast',
-          '-profile:v high', '-level 4.0', '-r 30',
-          '-vf format=yuv420p,scale=1080:1920',
-          '-c:a aac', '-b:a 128k', '-ar 44100', '-ac 2',
-          '-movflags +faststart', '-shortest'
-        ])
+        .input(imgPath).inputOptions(['-loop 1', '-framerate 30'])
+        .input(musicPath).inputOptions(['-stream_loop -1'])
+        .outputOptions(['-t 15', '-c:v libx264', '-preset veryfast', '-profile:v high', '-level 4.0', '-r 30', '-vf format=yuv420p,scale=1080:1920', '-c:a aac', '-b:a 128k', '-ar 44100', '-ac 2', '-movflags +faststart', '-shortest'])
         .output(videoPath)
-        .on('end', resolve)
-        .on('error', reject)
-        .run();
+        .on('end', resolve).on('error', reject).run();
     });
 
     const stat = fs.statSync(videoPath);
