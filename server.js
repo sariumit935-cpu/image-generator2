@@ -12,10 +12,12 @@ app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
 const MUSIC_URL = 'https://res.cloudinary.com/df1u8jqzy/video/upload/v1780299910/kutlama_abvxfs_cj39rm.mp3';
+const CLOUD_NAME = 'df1u8jqzy';
+const BG_PUBLIC_ID = 'confession_bg_1_nrxrxr';
 
 app.post('/generate', async (req, res) => {
-  const imageUrl = req.body.image_url;
-  if (!imageUrl) return res.status(400).json({ error: 'image_url is empty' });
+  const text = req.body.html;
+  if (!text) return res.status(400).json({ error: 'html is empty' });
 
   const tmpDir = '/tmp';
   const stamp = Date.now();
@@ -24,6 +26,16 @@ app.post('/generate', async (req, res) => {
   const musicPath = path.join(tmpDir, `music_${stamp}.mp3`);
 
   try {
+    // Metni kısalt ve temizle — Cloudinary URL'si için güvenli hale getir
+    // Cloudinary text overlay max ~50 kelime
+    const cleanText = text
+      .replace(/['"]/g, '')        // tırnak kaldır
+      .replace(/[^\x00-\x7F]/g, '') // emoji ve unicode kaldır
+      .substring(0, 300);           // max 300 karakter
+
+    const encoded = encodeURIComponent(cleanText);
+    const imageUrl = `https://res.cloudinary.com/${CLOUD_NAME}/image/upload/l_text:Arial_42:${encoded},co_rgb:1a1a1a,w_850,c_fit,g_north_west,x_130,y_340/${BG_PUBLIC_ID}.png`;
+
     // Görseli indir
     const imgRes = await axios.get(imageUrl, { responseType: 'stream', timeout: 30000 });
     await new Promise((resolve, reject) => {
@@ -65,7 +77,7 @@ app.post('/generate', async (req, res) => {
     fs.createReadStream(videoPath).pipe(res);
 
   } catch (err) {
-    console.error('Generate error:', err);
+    console.error('Generate error:', err.message);
     res.status(500).json({ error: err.message });
   } finally {
     [imgPath, videoPath, musicPath].forEach(f => {
