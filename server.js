@@ -4,7 +4,7 @@ const ffmpegStatic = require('ffmpeg-static');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const { createCanvas, registerFont } = require('canvas');
+const Jimp = require('jimp');
 
 ffmpeg.setFfmpegPath(ffmpegStatic);
 
@@ -14,36 +14,8 @@ app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
 const MUSIC_URL = 'https://res.cloudinary.com/df1u8jqzy/video/upload/v1780299910/kutlama_abvxfs_cj39rm.mp3';
 
-function wrapText(ctx, text, maxWidth) {
-  const words = text.split(' ');
-  const lines = [];
-  let current = '';
-  for (const word of words) {
-    const test = current ? current + ' ' + word : word;
-    if (ctx.measureText(test).width > maxWidth && current) {
-      lines.push(current);
-      current = word;
-    } else {
-      current = test;
-    }
-  }
-  if (current) lines.push(current);
-  return lines;
-}
-
-function drawRoundedRect(ctx, x, y, w, h, r) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + w - r, y);
-  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-  ctx.lineTo(x + w, y + h - r);
-  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-  ctx.lineTo(x + r, y + h);
-  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-  ctx.lineTo(x, y + r);
-  ctx.quadraticCurveTo(x, y, x + r, y);
-  ctx.closePath();
-}
+const FONT_LARGE = path.join(__dirname, 'fonts', 'open-sans-32-white.fnt');
+const FONT_MEDIUM = path.join(__dirname, 'fonts', 'open-sans-16-white.fnt');
 
 app.post('/generate', async (req, res) => {
   const text = req.body.html;
@@ -56,58 +28,47 @@ app.post('/generate', async (req, res) => {
   const musicPath = path.join(tmpDir, `music_${stamp}.mp3`);
 
   try {
-    // Canvas ile görsel oluştur
     const W = 1080, H = 1920;
-    const canvas = createCanvas(W, H);
-    const ctx = canvas.getContext('2d');
 
     // Arka plan
-    ctx.fillStyle = '#0d0d0d';
-    ctx.fillRect(0, 0, W, H);
+    const img = new Jimp({ width: W, height: H, color: 0x0d0d0dff });
 
-    // Wrapper kart
-    const padX = 65, cardY = 680, cardW = W - padX * 2, cardH = 560;
-    ctx.fillStyle = '#1a1a1a';
-    drawRoundedRect(ctx, padX, cardY, cardW, cardH, 50);
-    ctx.fill();
-    ctx.strokeStyle = '#333333';
-    ctx.lineWidth = 2;
-    ctx.stroke();
+    // Kart arka planı (koyu gri dikdörtgen)
+    const cardX = 65, cardY = 650, cardW = W - 130, cardH = 620;
+    const card = new Jimp({ width: cardW, height: cardH, color: 0x1a1a1aff });
+    img.composite(card, cardX, cardY);
 
-    // Header
-    ctx.fillStyle = '#888888';
-    ctx.font = '28px Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText('✉  CONFESSION TIME', W / 2, cardY + 70);
+    // Mesaj kutusu (beyaz)
+    const msgX = 115, msgY = 720, msgW = cardW - 100, msgH = 380;
+    const msgBox = new Jimp({ width: msgW, height: msgH, color: 0xf5f5f5ff });
+    img.composite(msgBox, msgX, msgY);
 
-    // Mesaj kutusu
-    const msgX = padX + 50, msgY = cardY + 110, msgW = cardW - 100, msgH = 340;
-    ctx.fillStyle = '#f5f5f5';
-    drawRoundedRect(ctx, msgX, msgY, msgW, msgH, 30);
-    ctx.fill();
+    // Fontları yükle
+    const fontLarge = await Jimp.loadFont(Jimp.FONT_SANS_32_BLACK);
+    const fontMedium = await Jimp.loadFont(Jimp.FONT_SANS_16_WHITE);
+
+    // Header yazısı
+    img.print(fontMedium, 0, cardY + 35, {
+      text: 'CONFESSION TIME',
+      alignmentX: Jimp.HORIZONTAL_ALIGN_CENTER,
+      alignmentY: Jimp.VERTICAL_ALIGN_MIDDLE
+    }, W, 40);
 
     // Mesaj metni
-    ctx.fillStyle = '#1a1a1a';
-    ctx.font = '34px Arial';
-    ctx.textAlign = 'left';
-    const lines = wrapText(ctx, text, msgW - 80);
-    const lineHeight = 52;
-    const totalTextH = lines.length * lineHeight;
-    let textY = msgY + (msgH - totalTextH) / 2 + 34;
-    for (const line of lines) {
-      ctx.fillText(line, msgX + 40, textY);
-      textY += lineHeight;
-    }
+    img.print(fontLarge, msgX + 30, msgY + 30, {
+      text: text,
+      alignmentX: Jimp.HORIZONTAL_ALIGN_LEFT,
+      alignmentY: Jimp.VERTICAL_ALIGN_TOP
+    }, msgW - 60, msgH - 60);
 
-    // Footer
-    ctx.fillStyle = '#555555';
-    ctx.font = '26px Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText('— anonymous confession —', W / 2, cardY + cardH - 30);
+    // Footer yazısı
+    img.print(fontMedium, 0, cardY + cardH - 50, {
+      text: '— anonymous confession —',
+      alignmentX: Jimp.HORIZONTAL_ALIGN_CENTER,
+      alignmentY: Jimp.VERTICAL_ALIGN_MIDDLE
+    }, W, 40);
 
-    // PNG kaydet
-    const buffer = canvas.toBuffer('image/png');
-    fs.writeFileSync(imgPath, buffer);
+    await img.write(imgPath);
 
     // Müzik indir
     const musicRes = await axios.get(MUSIC_URL, { responseType: 'stream', timeout: 60000 });
